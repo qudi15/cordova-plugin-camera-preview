@@ -400,8 +400,8 @@ public class CameraActivity extends Fragment {
         Log.d("ttttt",filepath+"/"+name);
         int width = bitmap.getWidth();
         int height = bitmap.getHeight();
-        float scalewidth = 0.25f;
-        float scaleheight = 0.25f;
+        float scalewidth = 0.5f;
+        float scaleheight = 0.5f;
         Matrix matrix = new Matrix();
         matrix.postScale(scalewidth,scaleheight);
         Bitmap newbm = Bitmap.createBitmap(bitmap,0, 0 ,width,height,matrix,true);
@@ -489,10 +489,10 @@ public class CameraActivity extends Fragment {
   }
 
 public static Bitmap convertToBlackWhite(Bitmap switchBitmap) {
-         int width = bmp.getWidth();  
-        int height = bmp.getHeight();  
+         int width = switchBitmap.getWidth();  
+        int height = switchBitmap.getHeight();  
         int[] pixels = new int[width * height];  
-        bmp.getPixels(pixels, 0, width, 0, 0, width, height);  
+        switchBitmap.getPixels(pixels, 0, width, 0, 0, width, height);  
         int alpha = 0xFF << 24;  
         for (int i = 0; i < height; i++) {  
             for (int j = 0; j < width; j++) {  

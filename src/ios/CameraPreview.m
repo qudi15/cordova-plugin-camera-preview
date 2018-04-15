@@ -710,7 +710,7 @@
             
             UIImage *image = [UIImage imageWithCGImage:resultFinalImage];
             NSData *data = UIImageJPEGRepresentation(image, quality);
-            NSData *thumbImageData = [self resizedImageDataFromHighImage:image withQuality:0.5];
+            NSData *thumbImageData = [self resizedImageDataFromHighImage:image withQuality:0.7];
             
             CGImageRelease(finalImage); // release CGImageRef to remove memory leaks
             CGImageRelease(resultFinalImage); // release CGImageRef to remove memory leaks
