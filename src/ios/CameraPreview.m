@@ -1,6 +1,7 @@
 #import <Cordova/CDV.h>
 #import <Cordova/CDVPlugin.h>
 #import <Cordova/CDVInvokedUrlCommand.h>
+#import <MediaPlayer/MediaPlayer.h>
 
 #import "CameraPreview.h"
 
@@ -10,11 +11,72 @@
     // start as transparent
     self.webView.opaque = NO;
     self.webView.backgroundColor = [UIColor clearColor];
+    
+    motionManager = [[CMMotionManager alloc] init];
+    motionManager.accelerometerUpdateInterval = .2;
+    motionManager.gyroUpdateInterval = .2;
+    
+    [motionManager startAccelerometerUpdatesToQueue:[NSOperationQueue currentQueue]
+                                        withHandler:^(CMAccelerometerData  *accelerometerData, NSError *error) {
+                                            if (!error) {
+                                                [self outputAccelertionData:accelerometerData.acceleration];
+                                            }
+                                            else{
+                                                NSLog(@"%@", error);
+                                            }
+                                        }];
+}
+
+- (void)outputAccelertionData:(CMAcceleration)acceleration{
+    UIImageOrientation orientationNew;
+    
+    if (acceleration.x >= 0.75) {
+        orientationNew = UIImageOrientationDown;//
+    }
+    else if (acceleration.x <= -0.75) {
+        orientationNew = UIImageOrientationUp;//left
+    }
+    else if (acceleration.y <= -0.75) {
+        orientationNew = UIImageOrientationRight;//
+    }
+    else if (acceleration.y >= 0.75) {
+        orientationNew = UIImageOrientationLeft;
+    }
+    else {
+        // Consider same as last time
+        return;
+    }
+    
+    if (orientationNew == imageOrientation)
+        return;
+    
+    imageOrientation = orientationNew;
+}
+
+
+-(void) observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
+    
+    if ([keyPath isEqual:@"outputVolume"]) {
+        float volumeLevel = [[MPMusicPlayerController applicationMusicPlayer] volume];
+        if (volumeLevel <= 0.1 || volumeLevel >= 0.9) {
+             [[MPMusicPlayerController applicationMusicPlayer] setVolume:(float) 0.5f];
+        }
+        else{
+            [self.commandDelegate evalJs:@"window.volumeButtonTaken()"];
+        }
+        
+    }
 }
 
 - (void) startCamera:(CDVInvokedUrlCommand*)command {
     
     CDVPluginResult *pluginResult;
+    AVAudioSession* audioSession = [AVAudioSession sharedInstance];
+    [audioSession setActive:YES error:nil];
+    [audioSession addObserver:self
+                   forKeyPath:@"outputVolume"
+                      options:0
+                      context:nil];
     
     if (self.sessionManager != nil) {
         pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Camera already started!"];
@@ -79,7 +141,9 @@
 - (void) stopCamera:(CDVInvokedUrlCommand*)command {
     NSLog(@"stopCamera");
     CDVPluginResult *pluginResult;
-    
+    AVAudioSession* audioSession = [AVAudioSession sharedInstance];
+    [audioSession setActive:YES error:nil];
+    [audioSession removeObserver:self forKeyPath:@"outputVolume"];
     if(self.sessionManager != nil) {
         [self.cameraRenderController.view removeFromSuperview];
         [self.cameraRenderController removeFromParentViewController];
@@ -431,6 +495,7 @@
         [self invokeTakePicture:width withHeight:height withQuality:quality withIndex:index withTs:ts isTap:false];
     } else {
         pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"Camera not started"];
+        
         [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
     }
 }
@@ -567,65 +632,6 @@
     [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
 }
 
-- (double)radiansFromUIImageOrientation:(UIImageOrientation)orientation {
-    double radians;
-    
-    switch ([[UIApplication sharedApplication] statusBarOrientation]) {
-        case UIDeviceOrientationPortrait:
-            radians = M_PI_2;
-            break;
-        case UIDeviceOrientationLandscapeLeft:
-            radians = 0.f;
-            break;
-        case UIDeviceOrientationLandscapeRight:
-            radians = M_PI;
-            break;
-        case UIDeviceOrientationPortraitUpsideDown:
-            radians = -M_PI_2;
-            break;
-    }
-    
-    return radians;
-}
-
--(CGImageRef) CGImageRotated:(CGImageRef) originalCGImage withRadians:(double) radians {
-    CGSize imageSize = CGSizeMake(CGImageGetWidth(originalCGImage), CGImageGetHeight(originalCGImage));
-    CGSize rotatedSize;
-    if (radians == M_PI_2 || radians == -M_PI_2) {
-        rotatedSize = CGSizeMake(imageSize.height, imageSize.width);
-    } else {
-        rotatedSize = imageSize;
-    }
-    
-    double rotatedCenterX = rotatedSize.width / 2.f;
-    double rotatedCenterY = rotatedSize.height / 2.f;
-    
-    UIGraphicsBeginImageContextWithOptions(rotatedSize, NO, 1.f);
-    CGContextRef rotatedContext = UIGraphicsGetCurrentContext();
-    if (radians == 0.f || radians == M_PI) { // 0 or 180 degrees
-        CGContextTranslateCTM(rotatedContext, rotatedCenterX, rotatedCenterY);
-        if (radians == 0.0f) {
-            CGContextScaleCTM(rotatedContext, 1.f, -1.f);
-        } else {
-            CGContextScaleCTM(rotatedContext, -1.f, 1.f);
-        }
-        CGContextTranslateCTM(rotatedContext, -rotatedCenterX, -rotatedCenterY);
-    } else if (radians == M_PI_2 || radians == -M_PI_2) { // +/- 90 degrees
-        CGContextTranslateCTM(rotatedContext, rotatedCenterX, rotatedCenterY);
-        CGContextRotateCTM(rotatedContext, radians);
-        CGContextScaleCTM(rotatedContext, 1.f, -1.f);
-        CGContextTranslateCTM(rotatedContext, -rotatedCenterY, -rotatedCenterX);
-    }
-    
-    CGRect drawingRect = CGRectMake(0.f, 0.f, imageSize.width, imageSize.height);
-    CGContextDrawImage(rotatedContext, drawingRect, originalCGImage);
-    CGImageRef rotatedCGImage = CGBitmapContextCreateImage(rotatedContext);
-    
-    UIGraphicsEndImageContext();
-    
-    return rotatedCGImage;
-}
-
 - (void) invokeTakePicture {
     [self invokeTakePicture:0.0 withHeight:0.0 withQuality:1 withIndex:self.nameIndex withTs:self.nameTs isTap:true];
 }
@@ -650,12 +656,87 @@
     
 }
 
+- (UIImage *)fixrotation:(UIImage *)image{
+    
+    if (image.imageOrientation == UIImageOrientationUp) return image;
+    CGAffineTransform transform = CGAffineTransformIdentity;
+    
+    switch (image.imageOrientation) {
+        case UIImageOrientationDown:
+        case UIImageOrientationDownMirrored:
+            transform = CGAffineTransformTranslate(transform, image.size.width, image.size.height);
+            transform = CGAffineTransformRotate(transform, M_PI);
+            break;
+            
+        case UIImageOrientationLeft:
+        case UIImageOrientationLeftMirrored:
+            transform = CGAffineTransformTranslate(transform, image.size.width, 0);
+            transform = CGAffineTransformRotate(transform, M_PI_2);
+            break;
+            
+        case UIImageOrientationRight:
+        case UIImageOrientationRightMirrored:
+            transform = CGAffineTransformTranslate(transform, 0, image.size.height);
+            transform = CGAffineTransformRotate(transform, -M_PI_2);
+            break;
+        case UIImageOrientationUp:
+        case UIImageOrientationUpMirrored:
+            break;
+    }
+    
+    switch (image.imageOrientation) {
+        case UIImageOrientationUpMirrored:
+        case UIImageOrientationDownMirrored:
+            transform = CGAffineTransformTranslate(transform, image.size.width, 0);
+            transform = CGAffineTransformScale(transform, -1, 1);
+            break;
+            
+        case UIImageOrientationLeftMirrored:
+        case UIImageOrientationRightMirrored:
+            transform = CGAffineTransformTranslate(transform, image.size.height, 0);
+            transform = CGAffineTransformScale(transform, -1, 1);
+            break;
+        case UIImageOrientationUp:
+        case UIImageOrientationDown:
+        case UIImageOrientationLeft:
+        case UIImageOrientationRight:
+            break;
+    }
+    
+    // Now we draw the underlying CGImage into a new context, applying the transform
+    // calculated above.
+    CGContextRef ctx = CGBitmapContextCreate(NULL, image.size.width, image.size.height,
+                                             CGImageGetBitsPerComponent(image.CGImage), 0,
+                                             CGImageGetColorSpace(image.CGImage),
+                                             CGImageGetBitmapInfo(image.CGImage));
+    CGContextConcatCTM(ctx, transform);
+    switch (image.imageOrientation) {
+        case UIImageOrientationLeft:
+        case UIImageOrientationLeftMirrored:
+        case UIImageOrientationRight:
+        case UIImageOrientationRightMirrored:
+            // Grr...
+            CGContextDrawImage(ctx, CGRectMake(0,0,image.size.height,image.size.width), image.CGImage);
+            break;
+            
+        default:
+            CGContextDrawImage(ctx, CGRectMake(0,0,image.size.width,image.size.height), image.CGImage);
+            break;
+    }
+    
+    // And now we just create a new UIImage from the drawing context
+    CGImageRef cgimg = CGBitmapContextCreateImage(ctx);
+    UIImage *img = [UIImage imageWithCGImage:cgimg];
+    CGContextRelease(ctx);
+    CGImageRelease(cgimg);
+    return img;
+}
+
 - (void) invokeTakePicture:(CGFloat) width withHeight:(CGFloat) height withQuality:(int) quality withIndex:(NSString*) index withTs:(NSString*) ts isTap:(bool)isTap{
     AVCaptureConnection *connection = [self.sessionManager.stillImageOutput connectionWithMediaType:AVMediaTypeVideo];
     [self.sessionManager.stillImageOutput captureStillImageAsynchronouslyFromConnection:connection completionHandler:^(CMSampleBufferRef sampleBuffer, NSError *error) {
         
         NSLog(@"Done creating still image");
-        
         if (error) {
             NSLog(@"%@", error);
         } else {
@@ -703,17 +784,11 @@
             NSMutableArray *params = [[NSMutableArray alloc] init];
             
             CGImageRef finalImage = [self.cameraRenderController.ciContext createCGImage:finalCImage fromRect:finalCImage.extent];
-            UIImage *resultImage = [UIImage imageWithCGImage:finalImage];
-            
-            double radians = [self radiansFromUIImageOrientation:resultImage.imageOrientation];
-            CGImageRef resultFinalImage = [self CGImageRotated:finalImage withRadians:radians];
-            
-            UIImage *image = [UIImage imageWithCGImage:resultFinalImage];
+            UIImage *image = [self fixrotation:[[UIImage alloc]initWithCGImage:finalImage scale:1.0 orientation:imageOrientation]] ;
             NSData *data = UIImageJPEGRepresentation(image, quality);
-            NSData *thumbImageData = [self resizedImageDataFromHighImage:image withQuality:0.7];
+            NSData *thumbImageData = [self resizedImageDataFromHighImage:image withQuality:0.5];
             
             CGImageRelease(finalImage); // release CGImageRef to remove memory leaks
-            CGImageRelease(resultFinalImage); // release CGImageRef to remove memory leaks
             
             NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
                                                                  NSUserDomainMask, YES);
@@ -756,5 +831,3 @@
 
 
 @end
-
-
